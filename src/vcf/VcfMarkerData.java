@@ -49,7 +49,9 @@ public final class VcfMarkerData {
     public static final int NULL_VALUE = -79;
 
     private final int nInitialMarkers; // includes markers failing MAF filter
+    private final int nMafFilteredMarkers;
     private final List<Marker> freqExcludedMarkers;
+    private final List<Marker> r2ExcludedMarkers;
     private final List<MarkerData> dataList;
     private final List<ScoreMarkerData> scoreDataList;
     private final BitSet isCorrelated;
@@ -139,6 +141,7 @@ public final class VcfMarkerData {
                 exclSamplesFile, chromInterval);
         this.samples = it.samples();
         this.freqExcludedMarkers = new ArrayList<Marker>(1000);
+        this.r2ExcludedMarkers = new ArrayList<Marker>(1000);
         this.dataList = new ArrayList<MarkerData>(INIT_N_MARKERS);
         this.scoreDataList = new ArrayList<ScoreMarkerData>(INIT_N_MARKERS);
         this.isCorrelated = new BitSet(INIT_N_MARKERS);
@@ -147,11 +150,15 @@ public final class VcfMarkerData {
             this.nInitialMarkers = readData(it, usePhase, minAlleleCount,
                     r2Window, r2Max, dataList, scoreDataList, isCorrelated,
                     freqExcludedMarkers);
+            this.nMafFilteredMarkers = dataList.size();
+            retainUncorrelatedMarkers(dataList, scoreDataList, isCorrelated,
+                    r2ExcludedMarkers);
         }
         else {
             ScoreFileData scoreFileData = readScoreFile(scoreFreqFile);
             this.nInitialMarkers = readScoreData(it, usePhase, scoreFileData,
                     dataList, scoreDataList);
+            this.nMafFilteredMarkers = dataList.size();
         }
         it.close();
     }
@@ -204,6 +211,29 @@ public final class VcfMarkerData {
             }
         }
         return markerCnt;
+    }
+
+    private static void retainUncorrelatedMarkers(List<MarkerData> dataList,
+            List<ScoreMarkerData> scoreDataList, BitSet isCorrelated,
+            List<Marker> r2ExcludedMarkers) {
+        List<MarkerData> retainedData =
+                new ArrayList<MarkerData>(dataList.size());
+        List<ScoreMarkerData> retainedScoreData =
+                new ArrayList<ScoreMarkerData>(scoreDataList.size());
+        for (int j=0, n=dataList.size(); j<n; ++j) {
+            if (isCorrelated.get(j)) {
+                r2ExcludedMarkers.add(dataList.get(j).marker());
+            }
+            else {
+                retainedData.add(dataList.get(j));
+                retainedScoreData.add(scoreDataList.get(j));
+            }
+        }
+        dataList.clear();
+        dataList.addAll(retainedData);
+        scoreDataList.clear();
+        scoreDataList.addAll(retainedScoreData);
+        isCorrelated.clear();
     }
 
     private static int readScoreData(SampleFileIterator<VcfRecord> it,
@@ -316,6 +346,16 @@ public final class VcfMarkerData {
     }
 
     /**
+     * Returns the number of markers passing the minor allele frequency
+     * filter before LD thinning.
+     * @return the number of markers passing the minor allele frequency
+     * filter before LD thinning.
+     */
+    public int nMafFilteredMarkers() {
+        return nMafFilteredMarkers;
+    }
+
+    /**
      * Returns the specified marker excluded by the minor allele frequency
      * filter.
      * @param index the index in the list of markers that failed
@@ -327,6 +367,18 @@ public final class VcfMarkerData {
      */
     public Marker frequencyExcludedMarkers(int index) {
         return freqExcludedMarkers.get(index);
+    }
+
+    /**
+     * Returns the specified marker excluded by the LD filter.
+     * @param index the index in the list of markers that failed
+     * the LD filter.
+     * @return the specified marker excluded by the LD filter.
+     * @throws IndexOutOfBoundsException if
+     * <code>index < 0 || index &ge; this.nCorrelatedMarkers</code>.
+     */
+    public Marker correlatedMarker(int index) {
+        return r2ExcludedMarkers.get(index);
     }
 
     /**
@@ -414,7 +466,7 @@ public final class VcfMarkerData {
      * excess inter-marker correlation.
      */
     public int nCorrelatedMarkers() {
-        return isCorrelated.cardinality();
+        return r2ExcludedMarkers.size();
     }
 
     /**

@@ -121,10 +121,8 @@ public class IbdSeqMain {
     private static void printR2Exclusions(VcfMarkerData vcfData, String outPrefix) {
         File f = new File(outPrefix + ".r2.filtered");
         PrintWriter out = FileUtil.printWriter(f);
-        for (int j=0, n=vcfData.nMarkers(); j<n; ++j) {
-            if (vcfData.isCorrelated(j)) {
-                out.println(vcfData.get(j).marker());
-            }
+        for (int j=0, n=vcfData.nCorrelatedMarkers(); j<n; ++j) {
+            out.println(vcfData.correlatedMarker(j));
         }
         out.close();
     }
@@ -147,15 +145,13 @@ public class IbdSeqMain {
         out.print(Const.tab);
         out.println("FREQ");
         for (int j=0, n=vcfData.nMarkers(); j<n; ++j) {
-            if (vcfData.isCorrelated(j)==false) {
-                Marker marker = vcfData.get(j).marker();
-                byte allele = vcfData.scoreAllele(j);
-                out.print(marker);
-                out.print(Const.tab);
-                out.print(marker.allele(allele));
-                out.print(Const.tab);
-                out.println(vcfData.scoreFrequency(j));
-            }
+            Marker marker = vcfData.get(j).marker();
+            byte allele = vcfData.scoreAllele(j);
+            out.print(marker);
+            out.print(Const.tab);
+            out.print(marker.allele(allele));
+            out.print(Const.tab);
+            out.println(vcfData.scoreFrequency(j));
         }
         out.close();
     }
@@ -390,8 +386,8 @@ public class IbdSeqMain {
         boolean includeDataStats = true;
         StringBuilder sb = new StringBuilder(300);
         if (includeDataStats) {
-            int nFilteredMarkers = data.nMarkers();
-            int nThinnedMarkers = data.nMarkers()-data.nCorrelatedMarkers();
+            int nFilteredMarkers = data.nMafFilteredMarkers();
+            int nThinnedMarkers = data.nMarkers();
             double thinnedProp =  (100.0 * nThinnedMarkers) / data.nInitialMarkers();
             sb.append("Data Statistics");
             sb.append(Const.nl);
