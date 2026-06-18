@@ -32,6 +32,7 @@ import java.util.Map;
 public final class IbdSeqPar {
 
     private static final String nl = Const.nl;
+    public static final String DEFAULT_BINS = "0,1,2,4,8,20,30,3000";
     private static final int IMAX = Integer.MAX_VALUE;
     private static final int IMIN = Integer.MIN_VALUE;
     private static final long LMIN = Long.MIN_VALUE;
@@ -46,6 +47,9 @@ public final class IbdSeqPar {
     private final File excludesamples;
     private final File focussamples;
     private final File scorefreq;
+    private final File map;
+    private final String bins;
+    private final double cmpermb;
     private final String chrom;
     private final int minalleles;
 
@@ -87,6 +91,11 @@ public final class IbdSeqPar {
                 argsMap, false, null, null));
         scorefreq = Validate.getFile(Validate.sString("scorefreq",
                 argsMap, false, null, null));
+        map = Validate.getFile(Validate.sString("map",
+                argsMap, false, null, null));
+        bins = Validate.sString("bins", argsMap, false, DEFAULT_BINS, null);
+        cmpermb = Validate.sDouble("cmpermb", argsMap, false, 1.0,
+                0.0, Double.MAX_VALUE);
         chrom = Validate.sString("chrom", argsMap, false, null, null);
         minalleles = Validate.sInt("minalleles", argsMap, false, 2, 2, Integer.MAX_VALUE);
 
@@ -151,6 +160,9 @@ public final class IbdSeqPar {
                 + "  excludemarkers=<excluded markers file>            (optional)" + nl
                 + "  focussamples=<focus samples file>                 (optional)" + nl
                 + "  scorefreq=<retained marker score file>            (optional)" + nl
+                + "  map=<genetic map file>                            (optional)" + nl
+                + "  bins=<cM length bins>                             (default=" + DEFAULT_BINS + ")" + nl
+                + "  cmpermb=<fixed cM per Mb without map>              (default=1.0)" + nl
                 + "  chrom=<[chrom]:[start]-[end]>                     (optional)" + nl
                 + "  minalleles=<minimum minor allele count>           (default=2)" + nl + nl
 
@@ -224,6 +236,33 @@ public final class IbdSeqPar {
      */
     public File scorefreq() {
         return scorefreq;
+    }
+
+    /**
+     * Returns the map parameter or <code>null</code> if no map parameter
+     * was specified.
+     *
+     * @return the map parameter or <code>null</code> if no map parameter
+     * was specified.
+     */
+    public File map() {
+        return map;
+    }
+
+    /**
+     * Returns the bins parameter.
+     * @return the bins parameter.
+     */
+    public String bins() {
+        return bins;
+    }
+
+    /**
+     * Returns the cmpermb parameter.
+     * @return the cmpermb parameter.
+     */
+    public double cmpermb() {
+        return cmpermb;
     }
 
     /**

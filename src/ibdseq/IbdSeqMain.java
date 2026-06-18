@@ -56,6 +56,7 @@ public class IbdSeqMain {
     private final IbdSeqPar par;
     private final PrintWriter log;
     private final VcfMarkerData data;
+    private final CmConverter cmConverter;
     private final int nSamples;
     private final IbdScorer scorer;
     private final IbdScores ibdScores;
@@ -89,6 +90,8 @@ public class IbdSeqMain {
         }
         this.startNanoTime = System.nanoTime();
         this.par = new IbdSeqPar(args);
+        this.cmConverter = CmConverter.create(par.map(), par.bins(),
+                par.cmpermb());
         this.log = FileUtil.printWriter(par.out() + ".log");
         this.scorer = new IbdScorer(par.errormax(), par.errorprop());
         Utilities.duoPrintln(log, beginJobSummary(par));
@@ -160,14 +163,14 @@ public class IbdSeqMain {
         final BlockingQueue<IntPair> qIn = new ArrayBlockingQueue<IntPair>(1000);
         final BlockingQueue<IbdTract2> qOut = new ArrayBlockingQueue<IbdTract2>(1000);
         final int nThreads = par.nthreads();
-        final File ibdFile = new File(par.out() + ".ibd");
-        final File hbdFile = new File(par.out() + ".hbd");
+        final File ibdFile = new File(par.out() + ".ibd.gz");
+        final File hbdFile = new File(par.out() + ".hbd.gz");
         final PairSelector pairSelector = PairSelector.create(par.focussamples(),
                 data);
         final long nPairCount = pairSelector.nPairs();
 
         final ConsumeIbd ibdConsumer = new ConsumeIbd(data, qOut, nThreads,
-                ibdFile, hbdFile);
+                ibdFile, hbdFile, cmConverter);
 
         ExecutorService es = Executors.newFixedThreadPool(nThreads+1);
         es.submit(ibdConsumer);
@@ -271,6 +274,19 @@ public class IbdSeqMain {
             sb.append("  scorefreq       :  ");
             sb.append(par.scorefreq());
         }
+        if (par.map()!=null) {
+            sb.append(Const.nl);
+            sb.append("  map             :  ");
+            sb.append(par.map());
+        }
+        else {
+            sb.append(Const.nl);
+            sb.append("  cmpermb         :  ");
+            sb.append(par.cmpermb());
+        }
+        sb.append(Const.nl);
+        sb.append("  bins            :  ");
+        sb.append(par.bins());
         if (par.chrom() != null) {
             sb.append(Const.nl);
             sb.append("  chrom           :  ");

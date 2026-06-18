@@ -23,6 +23,8 @@ import ibd.IbdTract2;
 import java.io.File;
 import java.io.PrintWriter;
 import java.text.DecimalFormat;
+import java.text.DecimalFormatSymbols;
+import java.util.Locale;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.atomic.AtomicLong;
 import main.Marker;
@@ -38,12 +40,14 @@ import vcf.VcfMarkerData;
 public class ConsumeIbd implements Runnable{
 
     public static final IbdTract2 POISON_TRACT = new IbdTract2(0, 0, 0, 1, 0.0f);
-    private static final DecimalFormat df2 = new DecimalFormat("0.00");
+    private static final DecimalFormat df2 = decimalFormat("0.00");
+    private static final DecimalFormat df3 = decimalFormat("0.000");
 
     private final PrintWriter ibdOut;
     private final PrintWriter hbdOut;
 
     private final VcfMarkerData vcfData;
+    private final CmConverter cmConverter;
     private final String[] sampleIds;
     private final BlockingQueue<IbdTract2> q;
     private final int nProducerThreads;
@@ -66,16 +70,20 @@ public class ConsumeIbd implements Runnable{
      * <code>vcfData==null || sampleIds==null || q==null || ibdFile==null</code>.
      */
     public ConsumeIbd(VcfMarkerData vcfData, BlockingQueue<IbdTract2> q,
-            int nProducers, File ibdFile, File hbdFile) {
+            int nProducers, File ibdFile, File hbdFile,
+            CmConverter cmConverter) {
         if (nProducers < 1) {
             throw new IllegalArgumentException("nProducers < 1: " + nProducers);
         }
-        this.ibdOut = FileUtil.printWriter(ibdFile);
-        this.hbdOut = FileUtil.printWriter(hbdFile);
+        this.ibdOut = FileUtil.gzipPrintWriter(ibdFile);
+        this.hbdOut = FileUtil.gzipPrintWriter(hbdFile);
         this.vcfData = vcfData;
+        this.cmConverter = cmConverter;
         this.sampleIds = SampleIds.ids();
         this.q = q;
         this.nProducerThreads = nProducers;
+        printHeader(ibdOut);
+        printHeader(hbdOut);
     }
 
     @Override
@@ -145,12 +153,12 @@ public class ConsumeIbd implements Runnable{
         String chrom = startMarker.chrom();
         int posStart = startMarker.pos();
         int posEnd = vcfData.get(tract.end()).marker().pos();
+        double posStartCm = cmConverter.cm(posStart);
+        double posEndCm = cmConverter.cm(posEnd);
+        double lengthCm = posEndCm - posStartCm;
+        String lengthBin = cmConverter.bin(lengthCm);
         PrintWriter out = ibdOut;
-        char hap1 = '0';
-        char hap2 = '0';
         if (tract.id1()==tract.id2()) {
-            hap1 = '1';
-            hap2 = '2';
             out = hbdOut;
         }
         count.incrementAndGet();
@@ -159,11 +167,7 @@ public class ConsumeIbd implements Runnable{
 
         out.print(sampleIds[tract.id1()]);
         out.print(Const.tab);
-        out.print(hap1);
-        out.print(Const.tab);
         out.print(sampleIds[tract.id2()]);
-        out.print(Const.tab);
-        out.print(hap2);
         out.print(Const.tab);
         out.print(chrom);
         out.print(Const.tab);
@@ -171,6 +175,41 @@ public class ConsumeIbd implements Runnable{
         out.print(Const.tab);
         out.print(posEnd);
         out.print(Const.tab);
-        out.println(df2.format(tract.score()));
+        out.print(df2.format(tract.score()));
+        out.print(Const.tab);
+        out.print(df3.format(posStartCm));
+        out.print(Const.tab);
+        out.print(df3.format(posEndCm));
+        out.print(Const.tab);
+        out.print(df3.format(lengthCm));
+        out.print(Const.tab);
+        out.println(lengthBin);
+    }
+
+    private static void printHeader(PrintWriter out) {
+        out.print("sample1");
+        out.print(Const.tab);
+        out.print("sample2");
+        out.print(Const.tab);
+        out.print("chromosome");
+        out.print(Const.tab);
+        out.print("pos_start");
+        out.print(Const.tab);
+        out.print("pos_end");
+        out.print(Const.tab);
+        out.print("lod");
+        out.print(Const.tab);
+        out.print("pos_start_cm");
+        out.print(Const.tab);
+        out.print("pos_end_cm");
+        out.print(Const.tab);
+        out.print("l_cm");
+        out.print(Const.tab);
+        out.println("l_cm_bin");
+    }
+
+    private static DecimalFormat decimalFormat(String pattern) {
+        return new DecimalFormat(pattern,
+                DecimalFormatSymbols.getInstance(Locale.US));
     }
 }
