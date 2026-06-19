@@ -36,6 +36,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import main.Marker;
 import vcf.VcfMarkerData;
 
@@ -164,46 +165,36 @@ public class IbdSeqMain {
     }
 
     private ConsumeIbd multiThreadedDetect() {
-        final BlockingQueue<IntPair> qIn = new ArrayBlockingQueue<IntPair>(1000);
-        final BlockingQueue<IbdTract2> qOut = new ArrayBlockingQueue<IbdTract2>(1000);
+        final BlockingQueue<IbdTract2> qOut =
+                new ArrayBlockingQueue<IbdTract2>(10000);
         final int nThreads = par.nthreads();
         final File ibdFile = new File(par.out() + ".ibd.gz");
         final File hbdFile = new File(par.out() + ".hbd.gz");
         final PairSelector pairSelector = PairSelector.create(par.focussamples(),
                 data);
-        final long nPairCount = pairSelector.nPairs();
 
         final ConsumeIbd ibdConsumer = new ConsumeIbd(data, qOut, nThreads,
                 ibdFile, hbdFile, cmConverter);
 
+        // Precompute the cache-friendly dose rows and folded score tables once,
+        // then hand each worker thread blocks of outer sample indices.
+        final byte[][] sampleDoses = data.sampleDoses();
+        final double[] ibdCell = ibdScores.ibdCell();
+        final double[] hbdCell = ibdScores.hbdCell();
+        final int nMarkers = data.nMarkers();
+        final boolean[] focus = pairSelector.focus();
+        final AtomicInteger nextS1 = new AtomicInteger(0);
+
+        Utilities.duoPrintln(log, midJobSummary());
+
         ExecutorService es = Executors.newFixedThreadPool(nThreads+1);
         es.submit(ibdConsumer);
         for (int j=0; j<nThreads; ++j) {
-            es.submit(new ProduceIbd(qIn, qOut, data, ibdScores, par.ibdlod(),
+            es.submit(new ProduceIbd(qOut, sampleDoses, ibdCell, hbdCell,
+                    nMarkers, nSamples, focus, nextS1, par.ibdlod(),
                     par.ibdtrim()));
         }
         try {
-            long milestone = Math.max(1L, nPairCount/10L);
-            long submittedCnt = 0;
-            boolean printedMidJobSummary = false;
-            for (int j=0; j<nSamples; ++j) {
-                for (int k=j; k<nSamples; ++k) {
-                    if (pairSelector.accept(j, k)) {
-                        qIn.put(new IntPair(j, k));
-                        ++submittedCnt;
-                        if (printedMidJobSummary==false
-                                && submittedCnt >= milestone) {
-                            long finishedCnt = submittedCnt - qIn.size();
-                            printEstimatedFinishTime(finishedCnt, nPairCount);
-                            Utilities.duoPrintln(log, midJobSummary());
-                            printedMidJobSummary = true;
-                        }
-                    }
-                }
-            }
-            for (int j=0; j<nThreads; ++j) {
-                qIn.put(ProduceIbd.POISON_PAIR);
-            }
             es.shutdown();
             es.awaitTermination(Long.MAX_VALUE, TimeUnit.DAYS);
         }
@@ -367,6 +358,10 @@ public class IbdSeqMain {
             return focus==null || focus[sampleA] || focus[sampleB];
         }
 
+        private boolean[] focus() {
+            return focus;
+        }
+
         private long nPairs() {
             return nPairs;
         }
@@ -407,7 +402,7 @@ public class IbdSeqMain {
         StringBuilder sb = new StringBuilder(300);
         if (includeDataStats) {
             int nFilteredMarkers = data.nMafFilteredMarkers();
-            int nThinnedMarkers = data.nMarkers();
+            int nThinnedMarkers = nFilteredMarkers - data.nCorrelatedMarkers();
             double thinnedProp =  (100.0 * nThinnedMarkers) / data.nInitialMarkers();
             sb.append("Data Statistics");
             sb.append(Const.nl);

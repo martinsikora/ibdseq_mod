@@ -31,6 +31,20 @@ public class IbdScores {
     private final double[][] ibdScores; // marker index is dim 2
     private final double[][] hbdScores; // marker index is dim 2
 
+    /*
+     * Marker-major, branchless score lookup tables used by the optimized
+     * detection scan. Doses are 0,1,2 with missing encoded as 3.
+     *   ibdCell[(j<<4) + (doseA<<2) + doseB] == ibdScore(doseA, doseB, j),
+     *     or 0 if either dose is missing, or 0 if marker j is LD-correlated and
+     *     the dose pair is not an opposite-homozygote (exclusion-only scoring).
+     *   hbdCell[(j<<2) + dose] == hbdScore(dose, j), or 0 if dose is missing,
+     *     or 0 if marker j is LD-correlated and dose != 1.
+     * Cells are doubles so that <code>float sum += cell</code> reproduces the
+     * exact arithmetic of the original <code>float sum += (double) score</code>.
+     */
+    private final double[] ibdCell;
+    private final double[] hbdCell;
+
     private static final int N_DOSES = 3;
     private static final int[][] dosePairIndex = dosePair2Index();
 
@@ -66,6 +80,75 @@ public class IbdScores {
         this.nMarkers = vcfData.nMarkers();
         this.ibdScores = getIbdScores(scorer, vcfData);
         this.hbdScores = getHbdScores(scorer, vcfData);
+        this.ibdCell = buildIbdCell(ibdScores, vcfData);
+        this.hbdCell = buildHbdCell(hbdScores, vcfData);
+    }
+
+    /*
+     * Folds the per-marker IBD scores, missing-genotype handling, and the
+     * LD-correlated exclusion-only rule into a flat marker-major table, so the
+     * detection scan is a single branchless array lookup per marker.
+     * Reproduces ProduceIbd.score() for cross-sample pairs exactly.
+     */
+    private static double[] buildIbdCell(double[][] ibdScores,
+            VcfMarkerData data) {
+        int n = data.nMarkers();
+        double[] cell = new double[n << 4];
+        for (int j=0; j<n; ++j) {
+            boolean isCor = data.isCorrelated(j);
+            int base = j << 4;
+            for (int dA=0; dA<N_DOSES; ++dA) {
+                for (int dB=0; dB<N_DOSES; ++dB) {
+                    boolean notIbs = (dA==0 && dB==2) || (dA==2 && dB==0);
+                    if (notIbs || isCor==false) {
+                        cell[base + (dA<<2) + dB] =
+                                ibdScores[dosePairIndex[dA][dB]][j];
+                    }
+                }
+            }
+        }
+        return cell;
+    }
+
+    /*
+     * Folds the per-marker HBD scores, missing-genotype handling, and the
+     * LD-correlated exclusion-only rule into a flat marker-major table.
+     * Reproduces ProduceIbd.score() for self pairs exactly.
+     */
+    private static double[] buildHbdCell(double[][] hbdScores,
+            VcfMarkerData data) {
+        int n = data.nMarkers();
+        double[] cell = new double[n << 2];
+        for (int j=0; j<n; ++j) {
+            boolean isCor = data.isCorrelated(j);
+            int base = j << 2;
+            for (int dose=0; dose<N_DOSES; ++dose) {
+                if (isCor==false || dose==1) {
+                    cell[base + dose] = hbdScores[dose][j];
+                }
+            }
+        }
+        return cell;
+    }
+
+    /**
+     * Returns the flat marker-major IBD score table, indexed by
+     * <code>(marker&lt;&lt;4) + (doseA&lt;&lt;2) + doseB</code> with doses in
+     * 0,1,2 and missing encoded as 3.
+     * @return the flat marker-major IBD score table.
+     */
+    public double[] ibdCell() {
+        return ibdCell;
+    }
+
+    /**
+     * Returns the flat marker-major HBD score table, indexed by
+     * <code>(marker&lt;&lt;2) + dose</code> with dose in 0,1,2 and missing
+     * encoded as 3.
+     * @return the flat marker-major HBD score table.
+     */
+    public double[] hbdCell() {
+        return hbdCell;
     }
 
     private static double[][] getIbdScores(IbdScorer scorer, VcfMarkerData data) {

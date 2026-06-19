@@ -56,6 +56,7 @@ public final class VcfMarkerData {
     private final List<ScoreMarkerData> scoreDataList;
     private final BitSet isCorrelated;
     private final Samples samples;
+    private byte[][] sampleDoses; // lazily built; [sample][marker], missing==3
 
     /**
      * Constructs a <code>VcfMarkerData</code> instance for the specified
@@ -151,8 +152,9 @@ public final class VcfMarkerData {
                     r2Window, r2Max, dataList, scoreDataList, isCorrelated,
                     freqExcludedMarkers);
             this.nMafFilteredMarkers = dataList.size();
-            retainUncorrelatedMarkers(dataList, scoreDataList, isCorrelated,
-                    r2ExcludedMarkers);
+            // Keep LD-correlated markers for exclusion-only scoring (stock
+            // IBDseq behavior); record them only for the .r2.filtered report.
+            recordCorrelatedMarkers(dataList, isCorrelated, r2ExcludedMarkers);
         }
         else {
             ScoreFileData scoreFileData = readScoreFile(scoreFreqFile);
@@ -213,27 +215,20 @@ public final class VcfMarkerData {
         return markerCnt;
     }
 
-    private static void retainUncorrelatedMarkers(List<MarkerData> dataList,
-            List<ScoreMarkerData> scoreDataList, BitSet isCorrelated,
-            List<Marker> r2ExcludedMarkers) {
-        List<MarkerData> retainedData =
-                new ArrayList<MarkerData>(dataList.size());
-        List<ScoreMarkerData> retainedScoreData =
-                new ArrayList<ScoreMarkerData>(scoreDataList.size());
+    /*
+     * Records the LD-correlated markers in <code>r2ExcludedMarkers</code> (for
+     * the .r2.filtered report) without removing them. The markers are retained
+     * in <code>dataList</code> with their <code>isCorrelated</code> flags so
+     * they contribute exclusion-only scores (opposite homozygotes for IBD,
+     * heterozygotes for HBD), matching stock IBDseq on the merged sample set.
+     */
+    private static void recordCorrelatedMarkers(List<MarkerData> dataList,
+            BitSet isCorrelated, List<Marker> r2ExcludedMarkers) {
         for (int j=0, n=dataList.size(); j<n; ++j) {
             if (isCorrelated.get(j)) {
                 r2ExcludedMarkers.add(dataList.get(j).marker());
             }
-            else {
-                retainedData.add(dataList.get(j));
-                retainedScoreData.add(scoreDataList.get(j));
-            }
         }
-        dataList.clear();
-        dataList.addAll(retainedData);
-        scoreDataList.clear();
-        scoreDataList.addAll(retainedScoreData);
-        isCorrelated.clear();
     }
 
     private static int readScoreData(SampleFileIterator<VcfRecord> it,
@@ -461,6 +456,33 @@ public final class VcfMarkerData {
      */
     public boolean isCorrelated(int index) {
         return isCorrelated.get(index);
+    }
+
+    /**
+     * Returns a sample-major table of scored-allele doses, indexed
+     * <code>[sample][marker]</code>. Each entry is the dose (0, 1, or 2) of the
+     * marker's scored allele for the sample, with missing genotypes encoded as
+     * 3. The table is built once on first call and cached. The contiguous
+     * per-sample marker rows give the detection scan two sequential streams per
+     * pair, replacing per-marker genotype reconstruction.
+     * @return a sample-major table of scored-allele doses.
+     */
+    public byte[][] sampleDoses() {
+        if (sampleDoses == null) {
+            int nMarkers = dataList.size();
+            int nSamples = samples.nSamples();
+            byte[][] doses = new byte[nSamples][nMarkers];
+            for (int j=0; j<nMarkers; ++j) {
+                MarkerData md = dataList.get(j);
+                byte allele = scoreDataList.get(j).allele();
+                for (int s=0; s<nSamples; ++s) {
+                    int dose = md.dose(s, allele);
+                    doses[s][j] = (byte) (dose < 0 ? 3 : dose);
+                }
+            }
+            sampleDoses = doses;
+        }
+        return sampleDoses;
     }
 
     /**
