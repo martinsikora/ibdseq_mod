@@ -157,7 +157,7 @@ public final class VcfMarkerData {
         else {
             ScoreFileData scoreFileData = readScoreFile(scoreFreqFile);
             this.nInitialMarkers = readScoreData(it, usePhase, scoreFileData,
-                    dataList, scoreDataList);
+                    dataList, scoreDataList, isCorrelated);
             this.nMafFilteredMarkers = dataList.size();
         }
         it.close();
@@ -238,7 +238,8 @@ public final class VcfMarkerData {
 
     private static int readScoreData(SampleFileIterator<VcfRecord> it,
             boolean usePhase, ScoreFileData scoreFileData,
-            List<MarkerData> dataList, List<ScoreMarkerData> scoreDataList) {
+            List<MarkerData> dataList, List<ScoreMarkerData> scoreDataList,
+            BitSet isCorrelated) {
         MarkerData[] matchedData = new MarkerData[scoreFileData.size()];
         ScoreMarkerData[] matchedScoreData = new ScoreMarkerData[scoreFileData.size()];
         Map<CoordKey, ScoreKey> nonMatchingCoordMap =
@@ -295,6 +296,9 @@ public final class VcfMarkerData {
                             + scoreRecord.key() + ", found " + observed;
                     throw new IllegalArgumentException(s);
                 }
+            }
+            if (scoreFileData.record(j).correlated()) {
+                isCorrelated.set(dataList.size());
             }
             dataList.add(matchedData[j]);
             scoreDataList.add(matchedScoreData[j]);
@@ -523,7 +527,7 @@ public final class VcfMarkerData {
     }
 
     private static boolean isScoreHeader(String[] fields) {
-        return fields.length==7
+        boolean baseMatch = fields.length>=7
                 && fields[0].equals("CHROM")
                 && fields[1].equals("POS")
                 && fields[2].equals("ID")
@@ -531,12 +535,19 @@ public final class VcfMarkerData {
                 && fields[4].equals("ALT")
                 && fields[5].equals("ALLELE")
                 && fields[6].equals("FREQ");
+        if (baseMatch==false) {
+            return false;
+        }
+        if (fields.length==7) {
+            return true;
+        }
+        return fields.length==8 && fields[7].equals("LD_PRUNED");
     }
 
     private static ScoreFileRecord scoreFileRecord(File scoreFile,
             String[] fields, int line, int index) {
-        if (fields.length != 7) {
-            String s = "Expected 7 tab-delimited fields on line " + line
+        if (fields.length != 7 && fields.length != 8) {
+            String s = "Expected 7 or 8 tab-delimited fields on line " + line
                     + " of " + scoreFile + ", found " + fields.length;
             throw new IllegalArgumentException(s);
         }
@@ -548,8 +559,22 @@ public final class VcfMarkerData {
         }
         int pos = parseScorePos(scoreFile, fields[1], line);
         float freq = parseScoreFreq(scoreFile, fields[6], line);
+        boolean correlated = (fields.length==8)
+                && parseLdPruned(scoreFile, fields[7], line);
         ScoreKey key = new ScoreKey(fields[0], pos, fields[3], fields[4]);
-        return new ScoreFileRecord(index, key, fields[5], freq);
+        return new ScoreFileRecord(index, key, fields[5], freq, correlated);
+    }
+
+    private static boolean parseLdPruned(File scoreFile, String value, int line) {
+        if (value.equals("0")) {
+            return false;
+        }
+        if (value.equals("1")) {
+            return true;
+        }
+        String s = "Invalid LD_PRUNED value on line " + line + " of "
+                + scoreFile + ": " + value + " (must be 0 or 1)";
+        throw new IllegalArgumentException(s);
     }
 
     private static int parseScorePos(File scoreFile, String value, int line) {
@@ -652,13 +677,15 @@ public final class VcfMarkerData {
         private final ScoreKey key;
         private final String allele;
         private final float frequency;
+        private final boolean correlated;
 
         private ScoreFileRecord(int index, ScoreKey key, String allele,
-                float frequency) {
+                float frequency, boolean correlated) {
             this.index = index;
             this.key = key;
             this.allele = allele;
             this.frequency = frequency;
+            this.correlated = correlated;
         }
 
         private int index() {
@@ -675,6 +702,10 @@ public final class VcfMarkerData {
 
         private float frequency() {
             return frequency;
+        }
+
+        private boolean correlated() {
+            return correlated;
         }
     }
 

@@ -146,7 +146,9 @@ public class IbdSeqMain {
         out.print(Const.tab);
         out.print("ALLELE");
         out.print(Const.tab);
-        out.println("FREQ");
+        out.print("FREQ");
+        out.print(Const.tab);
+        out.println("LD_PRUNED");
         for (int j=0, n=vcfData.nMarkers(); j<n; ++j) {
             Marker marker = vcfData.get(j).marker();
             byte allele = vcfData.scoreAllele(j);
@@ -154,7 +156,9 @@ public class IbdSeqMain {
             out.print(Const.tab);
             out.print(marker.allele(allele));
             out.print(Const.tab);
-            out.println(vcfData.scoreFrequency(j));
+            out.print(vcfData.scoreFrequency(j));
+            out.print(Const.tab);
+            out.println(vcfData.isCorrelated(j) ? 1 : 0);
         }
         out.close();
     }

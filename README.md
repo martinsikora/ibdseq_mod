@@ -6,12 +6,13 @@ The main additions are intended to support incremental IBD analysis:
 
 - `focussamples=<file>` restricts pairwise analysis to pairs where at least
   one sample is listed in the focus sample file.
-- `scorefreq=<file>` reuses the retained marker, scored allele, and scoring
-  frequency set from a previous run.
+- `scorefreq=<file>` reuses the marker set, scored allele, scoring frequency,
+  and LD-pruned classification from a previous run, so focus-mode scoring
+  matches stock IBDSeq on the merged set.
 - IBD and HBD segment output is written as gzip-compressed cM tables:
   `<out>.ibd.gz` and `<out>.hbd.gz`.
 - Every run writes `<out>.scorefreq`, a tab-delimited file with:
-  `CHROM POS ID REF ALT ALLELE FREQ`.
+  `CHROM POS ID REF ALT ALLELE FREQ LD_PRUNED`.
 
 ## Build
 
@@ -159,24 +160,43 @@ The score frequency file should normally be the `<out>.scorefreq` file written
 by a previous full IBDSeq run. It is tab-delimited with this header:
 
 ```text
-CHROM	POS	ID	REF	ALT	ALLELE	FREQ
+CHROM	POS	ID	REF	ALT	ALLELE	FREQ	LD_PRUNED
 ```
 
 Example:
 
 ```text
-CHROM	POS	ID	REF	ALT	ALLELE	FREQ
-PvP01_01_v1	118404	rs1	A	C	C	0.125
-PvP01_01_v1	155336	rs2	G	T	T	0.240
+CHROM	POS	ID	REF	ALT	ALLELE	FREQ	LD_PRUNED
+PvP01_01_v1	118404	rs1	A	C	C	0.125	0
+PvP01_01_v1	155336	rs2	G	T	T	0.240	1
 ```
 
-Rows are the LD-thinned markers retained by the full run. In focus mode,
-IBDSeq matches VCF markers by `CHROM`, `POS`, `REF`, and `ALT`, then reuses:
+Rows are **all** markers from the full run that pass the `minalleles` filter,
+in genomic order. In focus mode, IBDSeq matches VCF markers by `CHROM`, `POS`,
+`REF`, and `ALT`, then reuses:
 
 - `ALLELE` as the scored allele
 - `FREQ` as the allele frequency for IBD/HBD scoring
+- `LD_PRUNED` as the marker's role in the LD-pruned scan
 
-Focus mode does not perform additional LD pruning when `scorefreq` is used.
+The `LD_PRUNED` column reproduces stock IBDSeq scoring on the merged sample set:
+
+- `LD_PRUNED=0` (retained, LD-thinned): the marker contributes full IBD/HBD
+  scores.
+- `LD_PRUNED=1` (LD-pruned): the marker is **exclusion-only** — it contributes
+  only when it provides evidence against IBD/HBD (opposite homozygotes for IBD,
+  heterozygotes for HBD), exactly as stock IBDSeq uses correlated markers. This
+  preserves segment-boundary resolution from the dense marker set.
+
+The column is optional for backward compatibility: a 7-column scorefreq file
+(no `LD_PRUNED`) is read with every marker treated as retained
+(`LD_PRUNED=0`), matching the previous behavior.
+
+Focus mode performs no LD pruning or frequency estimation of its own when
+`scorefreq` is used: the frozen marker set, scored alleles, frequencies, and
+retained/pruned classification all come from the full run, so new samples do
+not perturb the scoring model. A pair involving a focus sample is then scored
+**bit-identically to stock IBDSeq on the merged set**, given that frozen model.
 
 ### Full-to-Focus Workflow
 
